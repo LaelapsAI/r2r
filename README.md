@@ -1,6 +1,11 @@
 R2R - Easy to use, runtime-agnostic, async rust bindings for ROS2.
 ====================
 
+> **LaelapsAI's fork of r2r 0.9.7.** On top of upstream:
+>
+> - `r2r::lifecycle`: a ROS 2 lifecycle (managed) node, serving what
+>   rclcpp's `LifecycleNode` serves.
+
 Easy to use bindings for ROS2 that do *not* require hooking in to the ROS2 build infrastructure -- `cargo build` is all you need. Convenience Rust types are created by calling into the c introspection libraries. This circumvents the ROS2 .msg/.idl pipeline by relying on already generated C code. By default, the behavior is to build bindings to the RCL and all message types that can be found in the currently sourced ros environment, but it is possible to be more specific to save on build time (see note below).
 
 When integration with the colcon build system is desired, a CMakeLists.txt file can be used to limit the generation of bindings to only include specific (idl) dependencies. This is done through additional environment variables. A minimal example of the colcon integration is available here: <https://github.com/m-dahl/r2r_minimal_node>.
