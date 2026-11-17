@@ -5,6 +5,16 @@ R2R - Easy to use, runtime-agnostic, async rust bindings for ROS2.
 >
 > - `r2r::lifecycle`: a ROS 2 lifecycle (managed) node, serving what
 >   rclcpp's `LifecycleNode` serves.
+> - A node can block in `spin_once` instead of polling:
+>   - `Node::waker()`: a guard condition in every wait set, so another thread
+>     can make `spin_once` return.
+>   - `Client::service_is_ready()` and `ActionClient::server_is_ready()`: an
+>     immediate answer, as rclcpp's, where `Node::is_available` resolves only
+>     at a later spin.
+>   - A subscription is destroyed as soon as its stream is dropped (dropping
+>     it wakes the node), not when its next message arrives.
+>   - `spin_once` keeps its wait set between spins, resizing it only when the
+>     node's entities change, as rclcpp's executors do.
 
 Easy to use bindings for ROS2 that do *not* require hooking in to the ROS2 build infrastructure -- `cargo build` is all you need. Convenience Rust types are created by calling into the c introspection libraries. This circumvents the ROS2 .msg/.idl pipeline by relying on already generated C code. By default, the behavior is to build bindings to the RCL and all message types that can be found in the currently sourced ros environment, but it is possible to be more specific to save on build time (see note below).
 

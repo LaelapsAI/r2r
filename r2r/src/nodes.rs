@@ -34,6 +34,7 @@ use crate::{
     qos::QosProfile,
     services::*,
     subscribers::*,
+    waker::*,
 };
 
 /// A ROS Node.
@@ -65,6 +66,10 @@ pub struct Node {
     // time source that provides simulated time
     #[cfg(r2r__rosgraph_msgs__msg__Clock)]
     time_source: TimeSource,
+    // wakes spin_once from other threads
+    waker: NodeWaker,
+    // kept between spins, so rmw can keep its entities attached
+    wait_set: rcl_wait_set_t,
 }
 
 unsafe impl Send for Node {}
@@ -210,6 +215,7 @@ impl Node {
                 time_source.attach_ros_clock(Arc::downgrade(&ros_clock))?;
                 time_source
             };
+            let waker = NodeWaker::new(&ctx)?;
 
             let mut node = Node {
                 params: Arc::new(Mutex::new(IndexMap::new())),
@@ -225,6 +231,8 @@ impl Node {
                 ros_clock,
                 #[cfg(r2r__rosgraph_msgs__msg__Clock)]
                 time_source,
+                waker,
+                wait_set: unsafe { rcl_get_zero_initialized_wait_set() },
             };
             node.load_params()?;
             Ok(node)
@@ -662,7 +670,7 @@ impl Node {
             sender,
         };
         self.subscribers.push(Box::new(ws));
-        Ok(receiver)
+        Ok(SubscriptionStream::new(receiver, self.waker.clone()))
     }
 
     /// Subscribe to a ROS topic.
@@ -683,7 +691,7 @@ impl Node {
             sender,
         };
         self.subscribers.push(Box::new(ws));
-        Ok(receiver)
+        Ok(SubscriptionStream::new(receiver, self.waker.clone()))
     }
 
     /// Subscribe to a ROS topic.
@@ -704,7 +712,7 @@ impl Node {
             sender,
         };
         self.subscribers.push(Box::new(ws));
-        Ok(receiver)
+        Ok(SubscriptionStream::new(receiver, self.waker.clone()))
     }
 
     /// Subscribe to a ROS topic.
@@ -749,7 +757,7 @@ impl Node {
             sender,
         };
         self.subscribers.push(Box::new(ws));
-        Ok(receiver)
+        Ok(SubscriptionStream::new(receiver, self.waker.clone()))
     }
 
     /// Create a ROS service.
@@ -798,6 +806,7 @@ impl Node {
             rcl_handle: client_handle,
             response_channels: Vec::new(),
             poll_available_channels: Vec::new(),
+            node: NodeHandle(&*self.node_handle),
         };
 
         let client_arc = Arc::new(Mutex::new(ws));
@@ -868,6 +877,7 @@ impl Node {
             result_requests: Vec::new(),
             goal_status: HashMap::new(),
             poll_available_channels: Vec::new(),
+            node: NodeHandle(&*self.node_handle),
         };
 
         let client_arc = Arc::new(Mutex::new(client));
@@ -1009,6 +1019,12 @@ impl Node {
         }
     }
 
+    /// A handle that makes `spin_once` return from another thread, so it
+    /// can block for long and still pick up work queued for the node.
+    pub fn waker(&self) -> NodeWaker {
+        self.waker.clone()
+    }
+
     /// Spin the ROS node.
     ///
     /// This handles wakeups of all subscribes, services, etc on the
@@ -1017,8 +1033,20 @@ impl Node {
     /// (see the examples).
     ///
     /// `timeout` is a duration specifying how long the spin should
-    /// block for if there are no pending events.
+    /// block for if there are no pending events, or until a
+    /// [`NodeWaker`] wakes it.
     pub fn spin_once(&mut self, timeout: Duration) {
+        // destroy the subscriptions whose stream has been dropped, rather
+        // than when their next message arrives
+        let node_handle = &mut self.node_handle;
+        self.subscribers.retain_mut(|s| {
+            let closed = s.is_closed();
+            if closed {
+                s.destroy(node_handle);
+            }
+            !closed
+        });
+
         // first handle any completed action cancellation responses
         for a in &mut self.action_servers {
             a.lock().unwrap().send_completed_cancel_requests();
@@ -1038,7 +1066,12 @@ impl Node {
         }
 
         let timeout = timeout.as_nanos() as i64;
-        let mut ws = unsafe { rcl_get_zero_initialized_wait_set() };
+        // the node's wait set, taken for the spin and put back when it ends.
+        // Taken, not copied: should a panic unwind out of the spin, the node
+        // is left with a zeroed one and the taken one leaks, rather than
+        // being finalized twice (resizing moves its arrays).
+        let mut ws =
+            std::mem::replace(&mut self.wait_set, unsafe { rcl_get_zero_initialized_wait_set() });
 
         // #[doc = "* This function is thread-safe for unique wait sets with unique contents."]
         // #[doc = "* This function cannot operate on the same wait set in multiple threads, and"]
@@ -1106,25 +1139,57 @@ impl Node {
             total_action_services += num_services;
         }
 
-        {
+        let sizes = (
+            self.subscribers.len() + total_action_subs,
+            1, // the waker
+            self.timers.len() + total_action_timers,
+            self.clients.len() + total_action_clients,
+            self.services.len() + total_action_services,
+        );
+        if ws.impl_.is_null() {
             let mut ctx = self.context.context_handle.lock().unwrap();
 
-            unsafe {
+            let ret = unsafe {
                 rcl_wait_set_init(
                     &mut ws,
-                    self.subscribers.len() + total_action_subs,
-                    0,
-                    self.timers.len() + total_action_timers,
-                    self.clients.len() + total_action_clients,
-                    self.services.len() + total_action_services,
+                    sizes.0,
+                    sizes.1,
+                    sizes.2,
+                    sizes.3,
+                    sizes.4,
                     0,
                     ctx.as_mut(),
                     rcutils_get_default_allocator(),
-                );
+                )
+            };
+            if ret != RCL_RET_OK as i32 {
+                log::error!("could not create a wait set: {}", ret);
+                return;
+            }
+        } else if sizes
+            != (
+                ws.size_of_subscriptions,
+                ws.size_of_guard_conditions,
+                ws.size_of_timers,
+                ws.size_of_clients,
+                ws.size_of_services,
+            )
+        {
+            let ret = unsafe {
+                rcl_wait_set_resize(&mut ws, sizes.0, sizes.1, sizes.2, sizes.3, sizes.4, 0)
+            };
+            if ret != RCL_RET_OK as i32 {
+                // the next spin creates a new one
+                log::error!("could not resize the wait set: {}", ret);
+                unsafe {
+                    rcl_wait_set_fini(&mut ws);
+                }
+                return;
             }
         }
         unsafe {
             rcl_wait_set_clear(&mut ws);
+            rcl_wait_set_add_guard_condition(&mut ws, self.waker.handle(), std::ptr::null_mut());
         }
 
         for s in &self.subscribers {
@@ -1179,9 +1244,7 @@ impl Node {
         let ret = unsafe { rcl_wait(&mut ws, timeout) };
 
         if ret == RCL_RET_TIMEOUT as i32 {
-            unsafe {
-                rcl_wait_set_fini(&mut ws);
-            }
+            self.wait_set = ws;
             return;
         }
 
@@ -1338,9 +1401,7 @@ impl Node {
             }
         }
 
-        unsafe {
-            rcl_wait_set_fini(&mut ws);
-        }
+        self.wait_set = ws;
     }
 
     /// Returns a map of topic names and type names of the publishers
@@ -1673,6 +1734,11 @@ impl Drop for Node {
         // fini functions are not thread safe so lock the context.
         let _ctx_handle = self.context.context_handle.lock().unwrap();
 
+        if !self.wait_set.impl_.is_null() {
+            unsafe {
+                rcl_wait_set_fini(&mut self.wait_set);
+            }
+        }
         for s in &mut self.subscribers {
             s.destroy(&mut self.node_handle);
         }

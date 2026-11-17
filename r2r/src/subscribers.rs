@@ -9,6 +9,8 @@ pub trait Subscriber_ {
     fn handle(&self) -> &rcl_subscription_t;
     /// Returns true if the subscriber stream has been dropped.
     fn handle_incoming(&mut self) -> bool;
+    /// Returns true if the subscriber stream has been dropped.
+    fn is_closed(&self) -> bool;
     fn destroy(&mut self, node: &mut rcl_node_t);
 }
 
@@ -48,6 +50,10 @@ where
         &self.rcl_handle
     }
 
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+
     fn handle_incoming(&mut self) -> bool {
         let mut msg_info = rmw_message_info_t::default(); // we dont care for now
         let mut msg = WrappedNativeMsg::<T>::new();
@@ -80,6 +86,10 @@ where
 {
     fn handle(&self) -> &rcl_subscription_t {
         &self.rcl_handle
+    }
+
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
     }
 
     fn handle_incoming(&mut self) -> bool {
@@ -160,6 +170,10 @@ impl Subscriber_ for UntypedSubscriber {
         &self.rcl_handle
     }
 
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+
     fn handle_incoming(&mut self) -> bool {
         let mut msg_info = rmw_message_info_t::default(); // we dont care for now
         let mut msg = WrappedNativeMsgUntyped::new_from(&self.topic_type)
@@ -190,6 +204,10 @@ impl Subscriber_ for UntypedSubscriber {
 impl Subscriber_ for RawSubscriber {
     fn handle(&self) -> &rcl_subscription_t {
         &self.rcl_handle
+    }
+
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
     }
 
     fn handle_incoming(&mut self) -> bool {
