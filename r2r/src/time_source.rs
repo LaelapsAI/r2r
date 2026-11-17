@@ -213,6 +213,12 @@ impl Subscriber_ for TimeSourceSubscriber {
         &self.subscriber_handle
     }
 
+    fn is_closed(&self) -> bool {
+        // No stream to drop: it goes through its own state, in
+        // `handle_incoming`, once the time source is disabled.
+        false
+    }
+
     fn handle_incoming(&mut self) -> bool {
         // update clock
         let mut msg_info = rmw_message_info_t::default(); // we dont care for now

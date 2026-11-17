@@ -128,6 +128,9 @@ pub use nodes::{Node, Timer};
 #[cfg(r2r__lifecycle_msgs__msg__State)]
 pub mod lifecycle;
 
+mod waker;
+pub use waker::NodeWaker;
+
 pub mod qos;
 
 #[cfg(r2r__rosgraph_msgs__msg__Clock)]

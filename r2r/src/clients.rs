@@ -9,6 +9,15 @@ use std::{
 use crate::{error::*, msg_types::*, QosProfile};
 use r2r_rcl::*;
 
+/// The node's handle a client keeps for its readiness check; null once the
+/// client is destroyed.
+#[derive(Clone, Copy)]
+pub(crate) struct NodeHandle(pub(crate) *const rcl_node_t);
+
+// SAFETY: it is only read under its client's lock, and the node's drop
+// destroys every client, under that lock, before finalizing the node.
+unsafe impl Send for NodeHandle {}
+
 /// ROS service client.
 ///
 /// This is a handle to a service client wrapped in a `Mutex` inside a
@@ -35,6 +44,26 @@ where
         let client = self.client.upgrade().ok_or(Error::RCL_RET_CLIENT_INVALID)?;
         let mut client = client.lock().unwrap();
         client.request(msg)
+    }
+
+    /// Whether a server for this service is available now, as rclcpp's
+    /// `service_is_ready`: one graph query, callable from any thread.
+    pub fn service_is_ready(&self) -> Result<bool> {
+        let client = self.client.upgrade().ok_or(Error::RCL_RET_CLIENT_INVALID)?;
+        let client = client.lock().unwrap();
+        // Node's drop destroys each client under its lock before it
+        // finalizes the node, and destroying clears `node`.
+        if client.node.0.is_null() {
+            return Err(Error::RCL_RET_CLIENT_INVALID);
+        }
+        let mut avail = false;
+        let ret =
+            unsafe { rcl_service_server_is_available(client.node.0, &client.rcl_handle, &mut avail) };
+        if ret == RCL_RET_OK as i32 {
+            Ok(avail)
+        } else {
+            Err(Error::from_rcl_error(ret))
+        }
     }
 }
 
@@ -146,6 +175,8 @@ where
     pub rcl_handle: rcl_client_t,
     pub response_channels: Vec<(i64, oneshot::Sender<T::Response>)>,
     pub poll_available_channels: Vec<oneshot::Sender<()>>,
+    // the node's handle, for `service_is_ready`; null once destroyed
+    pub(crate) node: NodeHandle,
 }
 
 impl<T: 'static> Client_ for TypedClient<T>
@@ -225,6 +256,7 @@ where
     }
 
     fn destroy(&mut self, node: &mut rcl_node_t) {
+        self.node = NodeHandle(std::ptr::null());
         unsafe {
             rcl_client_fini(&mut self.rcl_handle, node);
         }

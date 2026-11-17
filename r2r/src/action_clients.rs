@@ -13,6 +13,7 @@ use std::{
 
 use crate::{
     action_common::*,
+    clients::NodeHandle,
     error::*,
     msg_types::{
         generated_msgs::{action_msgs, builtin_interfaces, unique_identifier_msgs},
@@ -87,6 +88,30 @@ impl<T: 'static> ActionClient<T>
 where
     T: WrappedActionTypeSupport,
 {
+    /// Whether this action's server is available now, as rclcpp's
+    /// `action_server_is_ready`: graph queries only, callable from any
+    /// thread.
+    pub fn server_is_ready(&self) -> Result<bool> {
+        let client = self
+            .client
+            .upgrade()
+            .ok_or(Error::RCL_RET_ACTION_CLIENT_INVALID)?;
+        let client = client.lock().unwrap();
+        // Node's drop destroys each client under its lock before it
+        // finalizes the node, and destroying clears `node`.
+        if client.node.0.is_null() {
+            return Err(Error::RCL_RET_ACTION_CLIENT_INVALID);
+        }
+        let mut avail = false;
+        let ret =
+            unsafe { rcl_action_server_is_available(client.node.0, &client.rcl_handle, &mut avail) };
+        if ret == RCL_RET_OK as i32 {
+            Ok(avail)
+        } else {
+            Err(Error::from_rcl_error(ret))
+        }
+    }
+
     /// Make a new goal request.
     ///
     /// If the server accepts the new goal, the future resolves to a triple of:
@@ -199,6 +224,8 @@ where
     pub goal_status: HashMap<uuid::Uuid, GoalStatus>,
 
     pub poll_available_channels: Vec<oneshot::Sender<()>>,
+    // the node's handle, for `server_is_ready`; null once destroyed
+    pub(crate) node: NodeHandle,
 }
 
 pub trait ActionClient_ {
@@ -515,6 +542,7 @@ where
     }
 
     fn destroy(&mut self, node: &mut rcl_node_t) {
+        self.node = NodeHandle(std::ptr::null());
         unsafe {
             rcl_action_client_fini(&mut self.rcl_handle, node);
         }
