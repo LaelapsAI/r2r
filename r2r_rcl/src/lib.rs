@@ -7,6 +7,9 @@
 // It could be good to still warn if building with an older rust version.
 #![allow(improper_ctypes)]
 #![allow(improper_ctypes_definitions)]
+// bindgen derives PartialEq for the rcl structs that hold function pointers
+// (rcutils_allocator_s and others); rustc 1.86 and later warn about it.
+#![allow(unknown_lints, unpredictable_function_pointer_comparisons)]
 include!(concat!(env!("OUT_DIR"), "/rcl_bindings.rs"));
 
 use std::ffi::{CStr, CString};
