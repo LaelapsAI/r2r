@@ -47,6 +47,7 @@ fn main() {
         "r2r__example_interfaces__srv__AddTwoInts",
         "r2r__std_srvs__srv__Empty",
         "r2r__example_interfaces__action__Fibonacci",
+        "r2r__lifecycle_msgs__msg__State",
     ]);
     r2r_common::print_cargo_ros_distro();
 

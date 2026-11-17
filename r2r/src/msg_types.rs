@@ -281,6 +281,9 @@ pub struct UntypedActionSupport {
 }
 
 impl UntypedActionSupport {
+    // Called only by the generated action helper, which is empty when the
+    // message set has no actions.
+    #[allow(dead_code)]
     fn new<T>() -> Self
     where
         T: WrappedActionTypeSupport,
