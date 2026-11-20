@@ -572,6 +572,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ros_str_with_nul() {
+        // Copied by length: no panic, and the bytes after the NUL are kept,
+        // though reading it as a C string stops there.
+        let mut msg = WrappedNativeMsg::<std_msgs::msg::String>::new();
+        msg.data.assign("a\0b");
+        assert_eq!(msg.data.size, 3);
+        assert_eq!(msg.data.to_str(), "a");
+    }
+
+    #[test]
     fn test_copy_fields() {
         let msg_orig = std_msgs::msg::String { data: "hej".into() };
         let rosmsg = WrappedNativeMsg::<std_msgs::msg::String>::from(&msg_orig);

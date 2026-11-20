@@ -44,15 +44,15 @@ pub fn log(msg: &str, logger_name: &str, file: &str, line: u32, severity: LogSev
     // currently not possible to get function name in rust.
     // see https://github.com/rust-lang/rfcs/pull/2818
     let function = CString::new("").unwrap();
-    let file = CString::new(file).unwrap();
+    let file = c_string(file);
     let location = rcutils_log_location_t {
         function_name: function.as_ptr(),
         file_name: file.as_ptr(),
         line_number: line as usize,
     };
     let format = CString::new("%s").unwrap();
-    let logger_name = CString::new(logger_name).unwrap();
-    let message = CString::new(msg).unwrap();
+    let logger_name = c_string(logger_name);
+    let message = c_string(msg);
     let severity = severity.to_native();
     unsafe {
         rcutils_log(
@@ -63,6 +63,13 @@ pub fn log(msg: &str, logger_name: &str, file: &str, line: u32, severity: LogSev
             message.as_ptr(),
         );
     }
+}
+
+/// `s` as a C string, an interior NUL written as `\0`: a C string ends at
+/// its first NUL, and a message may hold one (a string from the network, say).
+fn c_string(s: &str) -> CString {
+    CString::new(s)
+        .unwrap_or_else(|_| CString::new(s.replace('\0', "\\0")).expect("every NUL was replaced"))
 }
 
 /// Logging severity
@@ -166,4 +173,7 @@ fn test_log() {
     log_warn!("log_test", "warn msg");
     log_error!("log_test", "error msg");
     log_fatal!("log_test", "fatal msg");
+    // An interior NUL is logged as `\0`, without a panic.
+    log_warn!("log_test", "a message with a NUL: {}", "a\0b");
+    log("msg", "logger\0name", "file\0name", 1, LogSeverity::Warn);
 }

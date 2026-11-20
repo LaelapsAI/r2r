@@ -12,7 +12,7 @@
 #![allow(unknown_lints, unpredictable_function_pointer_comparisons)]
 include!(concat!(env!("OUT_DIR"), "/rcl_bindings.rs"));
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 
 impl Default for rmw_message_info_t {
     fn default() -> Self {
@@ -29,9 +29,10 @@ impl rosidl_runtime_c__String {
     }
 
     pub fn assign(&mut self, other: &str) {
-        let q = CString::new(other).unwrap();
+        // By length, so an interior NUL is copied too, instead of the panic a
+        // C string (which ends at its first NUL) would need.
         unsafe {
-            rosidl_runtime_c__String__assign(self as *mut _, q.as_ptr());
+            rosidl_runtime_c__String__assignn(self as *mut _, other.as_ptr() as *const _, other.len());
         }
     }
 }
