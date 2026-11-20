@@ -3,7 +3,7 @@ use {
     quote::{format_ident, quote},
     rayon::prelude::*,
     std::fmt,
-    std::fs::{File, OpenOptions},
+    std::fs::File,
     std::io::{self, prelude::*, BufWriter},
 };
 
@@ -68,21 +68,39 @@ fn main() {
     {
         let env_hash = r2r_common::get_env_hash();
         let bindgen_dir = out_dir.join(env_hash);
-        let mark_file = bindgen_dir.join("done");
-        let msg_list = r2r_common::get_wanted_messages();
-        // On every run, cached files or not: cargo keeps only the latest run's
-        // directives, so a run that takes the cached files (an environment
-        // built before) must set the cfgs too, or every item gated on a
-        // message (the clock, the lifecycle node) is compiled out.
-        print_msg_cfgs(&msg_list);
+        // The cfg directives of the bindings, one
+        // `r2r__<package>__<msg|srv|action>__<Name>` per interface, for the
+        // items gated on them. Written last, the file also marks the bindings
+        // as done, so a cache from before it existed is generated again.
+        let cfgs_file = bindgen_dir.join("cfgs.txt");
         // If bindgen was done before, use cached files.
-        if !mark_file.exists() {
+        if !cfgs_file.exists() {
             eprintln!("Generate bindings in '{}'", bindgen_dir.display());
+            let msg_list = r2r_common::get_wanted_messages();
             generate_bindings(&bindgen_dir, &msg_list);
-            touch(&mark_file);
+            let cfgs: String = msg_list
+                .iter()
+                .map(|msg| {
+                    format!("cargo:rustc-cfg=r2r__{}__{}__{}\n", msg.module, msg.prefix, msg.name)
+                })
+                .collect();
+            fs::write(&cfgs_file, cfgs)
+                .unwrap_or_else(|_| panic!("Unable to write file '{}'", cfgs_file.display()));
         } else {
             eprintln!("Used cached files in '{}'", bindgen_dir.display());
         }
+        // On every run, cached files or not: cargo keeps only the latest run's
+        // directives, so a run that takes the cached files (an environment
+        // built before) must set the cfgs too, or every item gated on a
+        // message (the clock, the lifecycle node) is compiled out. They come
+        // from the cache, not from the interfaces installed now: the
+        // environment's hash covers only its variables, so a package installed
+        // or removed since would set a cfg the bindings don't match.
+        print!(
+            "{}",
+            fs::read_to_string(&cfgs_file)
+                .unwrap_or_else(|_| panic!("Unable to read file '{}'", cfgs_file.display()))
+        );
 
         copy_files(&bindgen_dir, &out_dir);
 
@@ -91,15 +109,6 @@ fn main() {
             fs::create_dir_all(&save_dir).unwrap();
             copy_files(&bindgen_dir, &save_dir);
         }
-    }
-}
-
-/// One `r2r__<package>__<msg|srv|action>__<Name>` cfg per interface in the
-/// bindings, for the items gated on them.
-#[cfg(not(feature = "doc-only"))]
-fn print_msg_cfgs(msg_list: &[r2r_common::RosMsg]) {
-    for msg in msg_list {
-        println!("cargo:rustc-cfg=r2r__{}__{}__{}", msg.module, msg.prefix, msg.name);
     }
 }
 
@@ -316,16 +325,6 @@ fn copy_files(src_dir: &Path, tgt_dir: &Path) {
         });
 
     fs::copy(&src_list_file, tgt_list_file).unwrap();
-}
-
-#[cfg(not(feature = "doc-only"))]
-fn touch(path: &Path) {
-    OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-        .unwrap_or_else(|_| panic!("Unable to create file '{}'", path.display()));
 }
 
 #[cfg(not(feature = "doc-only"))]
