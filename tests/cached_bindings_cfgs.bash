@@ -24,7 +24,8 @@ build 'std_msgs;lifecycle_msgs;rosgraph_msgs' --quiet
 # cache. -vv echoes what it prints as "[r2r <version>] <line>", wherever
 # this cargo keeps its build directories (their layout changes across
 # versions).
-log=$(build 'std_msgs;lifecycle_msgs' -vv 2>&1)
+log=$(build 'std_msgs;lifecycle_msgs' -vv 2>&1) ||
+  { echo "$log" >&2; echo "the last build failed" >&2; exit 1; }
 grep -q '^\[r2r [0-9.]*\] Used cached files' <<<"$log" ||
   { echo "the last build didn't take the cached bindings: nothing tested" >&2; exit 1; }
 grep -q '^\[r2r [0-9.]*\] cargo:rustc-cfg=r2r__lifecycle_msgs__msg__State$' <<<"$log" ||
