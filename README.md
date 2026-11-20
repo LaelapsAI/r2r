@@ -15,6 +15,10 @@ R2R - Easy to use, runtime-agnostic, async rust bindings for ROS2.
 >     it wakes the node), not when its next message arrives.
 >   - `spin_once` keeps its wait set between spins, resizing it only when the
 >     node's entities change, as rclcpp's executors do.
+> - The build script sets the `r2r__<package>__<msg|srv|action>__<Name>` cfgs
+>   also when it reuses its cached bindings (an environment built before), so
+>   items gated on a message, such as `r2r::lifecycle`, aren't compiled out
+>   (`tests/cached_bindings_cfgs.bash`).
 
 Easy to use bindings for ROS2 that do *not* require hooking in to the ROS2 build infrastructure -- `cargo build` is all you need. Convenience Rust types are created by calling into the c introspection libraries. This circumvents the ROS2 .msg/.idl pipeline by relying on already generated C code. By default, the behavior is to build bindings to the RCL and all message types that can be found in the currently sourced ros environment, but it is possible to be more specific to save on build time (see note below).
 

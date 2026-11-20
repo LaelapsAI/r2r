@@ -29,6 +29,13 @@ jobs:
     - run: docker build . --file ./tests/Dockerfile_jazzy --tag r2r_jazzy
     - run: docker run r2r_jazzy /r2r/tests/build_minimal_node.bash
 
+  cached_bindings_humble:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: docker build . --file ./tests/Dockerfile_humble --tag r2r_humble
+    - run: docker run r2r_humble /r2r/tests/cached_bindings_cfgs.bash
+
   tests_lyrical:
     runs-on: ubuntu-latest
     steps:
