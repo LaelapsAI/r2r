@@ -295,10 +295,14 @@ impl Lifecycle {
     }
 
     fn publish(&self, id: u8, label: &str, start: (u8, &str), goal: (u8, &str)) {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         let event = TransitionEvent {
-            timestamp,
+            // `uint64 timestamp`, in nanoseconds, up to Jazzy; Lyrical
+            // replaced it with `builtin_interfaces/Time stamp`.
+            #[cfg(not(any(r2r__ros__distro__lyrical, r2r__ros__distro__rolling)))]
+            timestamp: since_epoch.as_nanos() as u64,
+            #[cfg(any(r2r__ros__distro__lyrical, r2r__ros__distro__rolling))]
+            stamp: crate::Clock::to_builtin_time(&since_epoch),
             transition: TransitionMsg { id, label: label.to_string() },
             start_state: state_msg(start),
             goal_state: state_msg(goal),
