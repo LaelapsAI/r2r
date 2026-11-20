@@ -69,10 +69,16 @@ fn main() {
         let env_hash = r2r_common::get_env_hash();
         let bindgen_dir = out_dir.join(env_hash);
         let mark_file = bindgen_dir.join("done");
+        let msg_list = r2r_common::get_wanted_messages();
+        // On every run, cached files or not: cargo keeps only the latest run's
+        // directives, so a run that takes the cached files (an environment
+        // built before) must set the cfgs too, or every item gated on a
+        // message (the clock, the lifecycle node) is compiled out.
+        print_msg_cfgs(&msg_list);
         // If bindgen was done before, use cached files.
         if !mark_file.exists() {
             eprintln!("Generate bindings in '{}'", bindgen_dir.display());
-            generate_bindings(&bindgen_dir);
+            generate_bindings(&bindgen_dir, &msg_list);
             touch(&mark_file);
         } else {
             eprintln!("Used cached files in '{}'", bindgen_dir.display());
@@ -88,12 +94,20 @@ fn main() {
     }
 }
 
+/// One `r2r__<package>__<msg|srv|action>__<Name>` cfg per interface in the
+/// bindings, for the items gated on them.
 #[cfg(not(feature = "doc-only"))]
-fn generate_bindings(bindgen_dir: &Path) {
+fn print_msg_cfgs(msg_list: &[r2r_common::RosMsg]) {
+    for msg in msg_list {
+        println!("cargo:rustc-cfg=r2r__{}__{}__{}", msg.module, msg.prefix, msg.name);
+    }
+}
+
+#[cfg(not(feature = "doc-only"))]
+fn generate_bindings(bindgen_dir: &Path, msg_list: &[r2r_common::RosMsg]) {
     fs::create_dir_all(bindgen_dir).unwrap();
 
-    let msg_list = r2r_common::get_wanted_messages();
-    let msgs = r2r_common::as_map(&msg_list);
+    let msgs = r2r_common::as_map(msg_list);
 
     {
         let modules = {
@@ -128,10 +142,9 @@ fn generate_bindings(bindgen_dir: &Path) {
                 .map(|(prefix, msgs)| {
                     let prefix_content = match *prefix {
                         "msg" => {
-                            let msg_snipplets = msgs.iter().map(|msg| {
-                                println!("cargo:rustc-cfg=r2r__{}__{}__{}", module, prefix, msg);
-                                r2r_msg_gen::generate_rust_msg(module, prefix, msg)
-                            });
+                            let msg_snipplets = msgs
+                                .iter()
+                                .map(|msg| r2r_msg_gen::generate_rust_msg(module, prefix, msg));
 
                             quote! {
                                 use super::super::*;
@@ -144,10 +157,6 @@ fn generate_bindings(bindgen_dir: &Path) {
                                     r2r_msg_gen::generate_rust_service(module, prefix, msg);
                                 let msg_snipplets = ["Request", "Response"].iter().map(|s| {
                                     let msgname = format!("{}_{}", msg, s);
-                                    println!(
-                                        "cargo:rustc-cfg=r2r__{}__{}__{}",
-                                        module, prefix, msg
-                                    );
                                     r2r_msg_gen::generate_rust_msg(module, prefix, &msgname)
                                 });
                                 let msg = format_ident!("{msg}");
@@ -174,10 +183,6 @@ fn generate_bindings(bindgen_dir: &Path) {
                                 let msg_snipplets =
                                     ["Goal", "Result", "Feedback"].iter().map(|s| {
                                         let msgname = format!("{}_{}", msg, s);
-                                        println!(
-                                            "cargo:rustc-cfg=r2r__{}__{}__{}",
-                                            module, prefix, msg
-                                        );
                                         r2r_msg_gen::generate_rust_msg(module, prefix, &msgname)
                                     });
 
